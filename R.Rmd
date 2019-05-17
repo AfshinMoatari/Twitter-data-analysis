@@ -1,0 +1,283 @@
+---
+title: "Twitter Analysis"
+author: "Afshin moatari"
+date: "26/3/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load("tidytext", "knitr","dplyr","ggplot2","stringr","data.table","tm","wordcloud","wordcloud2","syuzhet","devtools","widyr","tidyr","igraph","ggraph","readr", "SnowballC", "webshot", "htmlwidgets", "igraph", "scales")
+
+install_github("lchiffon/wordcloud2")
+library(tidytext)
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(data.table)
+library(tm)
+library(wordcloud)
+library(wordcloud2)
+library(syuzhet)
+library(devtools)
+library(widyr)
+library(tidyr)
+library(igraph)
+library(ggraph)
+library(readr)
+library(stringr)
+library(SnowballC)
+library(webshot)
+library(htmlwidgets)
+library(scales)
+webshot::install_phantomjs()
+
+```
+#Read the primary input file
+```{r}
+tweets <- read_csv("input/dataPrimary.csv") # Read the input file
+
+```
+
+#Read the secondary input file
+```{r}
+tweetsS <- read_csv("input/dataSecondary.csv") # Read the input file
+
+```
+
+#WordCloud
+```{r}
+hashtags=str_extract_all(tweets$hashtags, "#\\w+") # Extract hashtags
+hashtags=unlist(hashtags) # Structurethe list of hastgas 
+docs<-Corpus(VectorSource(hashtags)) # Create a vector source and turn it into corpus structure
+dtm<-TermDocumentMatrix(docs) # Create a table of matrix with the terms(hashtags name) and the docs(hashtag entry) in order to find out how many times each hashtags repeated in the data set
+m<-as.matrix(dtm)
+v<-sort(rowSums(m),decreasing=TRUE) # Sort the hashtags based on frequency(decreasing)
+d<-data.frame(hashtags=names(v),freq=v) # Convet to data frame with two columns(hastgas,freq)
+write.csv(d,"output\\csv\\hashtags.csv", row.names = FALSE) # Export the hastags frequency in CSV 
+d <- filter(d, !hashtags %in% c('#tamirrice', '#https')) # Remove some hashtags from graph
+wordcloud2(d, size=1)
+my_graph=wordcloud2(d, size=1) # Make the graph
+saveWidget(my_graph,file.path(normalizePath(dirname("output\\wordcloud\\graph.html")),basename("output\\wordcloud\\graph.html")),selfcontained = F) # Save the graph in html
+webshot("output/wordcloud/graph.html","output/wordcloud/graph.pdf", delay =5, vwidth = 1920, vheight=1080) # Crate the graph in pdf
+
+```
+
+#Relationships Between Hashtags
+```{r}
+l <- length(tweets$hashtags) # Number of node to be rendered
+# define a tag extractor function
+tags <- function(x) toupper(grep("^#", strsplit(x, " +")[[1]], value = TRUE))
+# Create a list of the tag sets for each tweet
+taglist <- vector(mode = "list", l)
+# ... and populate it
+for (i in 1:l) taglist[[i]] <- tags(tweets$hashtags[i])
+# Now make a list of all unique hashtags
+alltags <- NULL
+for (i in 1:l) alltags <- union(alltags, taglist[[i]])
+
+hash.graph <- graph.empty(directed = FALSE) # Create an empty graph
+hash.graph <- hash.graph + vertices(alltags) # Populate it with nodes
+# Populate it with edges
+for (tags in taglist) {
+    if (length(tags) > 1) {
+        for (pair in combn(length(tags), 2, simplify = FALSE, FUN = function(x) sort(tags[x]))) {
+            if (pair[1] != pair[2]) {
+                if (hash.graph[pair[1], pair[2]] == 0) 
+                  hash.graph <- hash.graph + edge(pair[1], pair[2])
+            }
+        }
+    }
+}
+hash.graph$layout <- layout_with_fr
+V(hash.graph)$color <- "tomato"
+E(hash.graph)$color <- "blue"
+V(hash.graph)$label <- V(hash.graph)$name
+V(hash.graph)$label.cex = .5
+V(hash.graph)$size <- 2
+V(hash.graph)$size2 <- .2
+V(hash.graph)$shape <- "circle"
+##tkplot(hash.graph,canvas.width = 1920, canvas.height = 1080) #Produce external plots with custome size
+plot(hash.graph, edge.arrow.size = 0.2)
+##write_graph(hash.graph, "output\\gephi\\NWgraph.graphml", format="graphml") #Save as graphml format for external graph editor ex.Gephi
+##write_graph(hash.graph, "output\\gephi\\NWgraph.ncol", format="ncol") 
+
+```
+
+
+#Tweet activity timeline 
+```{r}
+dates=str_extract_all(tweets$date, "\\d+-\\d+-\\d+")
+dates=unlist(dates) # Structurethe list of hastgas 
+docs<-Corpus(VectorSource(dates)) # Create a vector source and turn it into corpus structure
+dtm<-TermDocumentMatrix(docs) # Create a table of matrix with the terms(hashtags name) and the docs(hashtag entry) in order to find out how many times each hashtags repeated in the data set
+m<-as.matrix(dtm)
+v<-sort(rowSums(m),decreasing=TRUE)  # Sort the hashtags based on frequency(decreasing)
+d<-data.frame(date=names(v),freq=v) # Convet to data frame with two columns(hastgas,freq)
+write.csv(d,"output\\csv\\dates.csv", row.names = FALSE) # Export the hastags frequency in CSV 
+```
+
+#Word frequencies
+```{r}
+combinedText <- paste(tweets$text, replace(tweets$mentions, is.na(tweets$mentions), "")) # Combine the text and mentions column
+combinedText <- gsub("#\\S+", "", combinedText) # exclude the hashtags
+combinedText <- gsub("@\\S+", "", combinedText) # exclude the mentions
+combinedText <- gsub("[[:cntrl:]]", "", combinedText) # remove Controls and special characters
+combinedText <- gsub("\\d", "", combinedText) # remove Controls and special characters
+combinedText <- gsub("^[[:space:]]*", "", combinedText) # remove leading whitespaces
+combinedText <- gsub("[[:space:]]*$", "", combinedText) # remove trailing whitespaces
+combinedText <- gsub("<.*?>.*?<.*?>", " ", combinedText) # remove all the tags
+combinedText <- gsub(" +", " ", combinedText) # remove extra whitespaces
+combinedText <- gsub("pic(.*)[.|/](.*)", "", combinedText) # exclude the twitter picture links
+combinedText <- gsub("?(f|ht)(tp)(s?)(://)(.*)[.|/](.*)", "", combinedText) # exclude the ftp/http(s) links
+cleanedText <- tibble(text = combinedText) # convert into a data frame without changing the type of inputs.
+
+data(stop_words) # creating dataset of stop words
+mystopwords <- data_frame(word = c("rt")) # creating custom dataset of stop words
+
+words <- cleanedText %>%  # Creating tidy dataset of words from each tweets
+  unnest_tokens(word, text) %>%
+    anti_join(stop_words) %>% # Applying the stop word removal 
+    anti_join(mystopwords) # Applying the custom stop word removal
+
+words <- words%>% # Creating most common words used in our tidy dataset
+  count(word, sort = TRUE)
+head(words)
+write.csv(words,"output\\csv\\wordfrequency #BlaclLivesMatter.csv", row.names = FALSE) # Export the word frequency in CSV 
+
+words %>% 
+  filter(n > 400) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n)) +
+  geom_col() +
+  xlab(NULL) +
+  coord_flip() +
+  labs(title = "Word Network: Tweets using the hashtag - BlaclLivesMatter",
+             subtitle = "Word frequencies",
+             x = "", y = "") +
+  theme(text=element_text(size=8))+
+  ggsave("output\\wordnetworks\\wordfrequency #BlaclLivesMatter.svg")
+
+```
+
+
+#Word frequencies (comparison)
+```{r}
+tweet_cleaner <- function(dirtyText) {
+  dirtyText <- gsub("#\\S+", "", dirtyText) # exclude the hashtags
+  dirtyText <- gsub("@\\S+", "", dirtyText) # exclude the mentions
+  dirtyText <- gsub("[[:cntrl:]]", "", dirtyText) # remove Controls and special characters
+  dirtyText <- gsub("\\d", "", dirtyText) # remove Controls and special characters
+  dirtyText <- gsub("^[[:space:]]*", "", dirtyText) # remove leading whitespaces
+  dirtyText <- gsub("[[:space:]]*$", "", dirtyText) # remove trailing whitespaces
+  dirtyText <- gsub(" +", " ", dirtyText) # remove extra whitespaces
+  dirtyText <- gsub("<.*?>.*?<.*?>", " ", dirtyText) # remove all the tags
+  dirtyText <- gsub("pic(.*)[.|/](.*)", "", dirtyText) # exclude the twitter picture links
+  dirtyText <- gsub("?(f|ht)(tp)(s?)(://)(.*)[.|/](.*)", "", dirtyText) # exclude the ftp/http(s) links
+  cleanedText <- tibble(text = dirtyText) # convert into a data frame without changing the type of inputs.
+  return(cleanedText)
+}
+
+tidy_tweets <- function(tweets) {
+  data(stop_words) # creating dataset of stop words
+  mystopwords <- data_frame(word = c("rt")) # creating custom dataset of stop words
+  words <- tweets %>%  
+  unnest_tokens(word, text) %>%
+    anti_join(stop_words) %>% # Applying the stop word removal 
+    anti_join(mystopwords) # Applying the custom stop word removal
+  return(words)
+}
+
+combinedTextPrimary <- paste(tweets$text, replace(tweets$mentions, is.na(tweets$mentions), "")) # Combine the text and mentions column
+combinedTextPrimary <- tweet_cleaner(combinedTextPrimary) # clean primary tweets
+wordsPrimary <- tidy_tweets(combinedTextPrimary) # Creating tidy dataset of words from each tweets
+
+combinedTextSecondary <- paste(tweetsS$text, replace(tweetsS$mentions, is.na(tweetsS$mentions), "")) # Combine the text and mentions column
+combinedTextSecondary <- tweet_cleaner(combinedTextSecondary) # clean secondary tweets
+wordsSecondary <- tidy_tweets(combinedTextSecondary) # Creating tidy dataset of words from each tweets
+
+combinedTweets <- bind_rows( # Combine two data sets and  assign the dataset name as column name
+                    wordsPrimary %>% 
+                      mutate(datasetName = "#ICantBreathe"),
+                    wordsSecondary %>% 
+                      mutate(datasetName = "#TamirRice"))
+
+frequency <- combinedTweets %>% 
+  group_by(datasetName) %>% 
+  count(word, sort = TRUE) %>% 
+  left_join(combinedTweets %>% 
+              group_by(datasetName) %>% 
+              summarise(total = n())) %>%
+  mutate(freq = n/total)
+
+frequency <- frequency %>% 
+  select(datasetName, word, freq) %>% 
+  spread(datasetName, freq) %>%
+  arrange(`#ICantBreathe`, `#TamirRice`)
+
+write.csv(frequency,"output\\csv\\wordfrequencycomparison.csv", row.names = FALSE) # Export the word frequency comparison in CSV 
+
+ggplot(frequency, aes(`#ICantBreathe`, `#TamirRice`)) +
+  geom_jitter(alpha = 0.1, size = 2, width = 0.35, height = 0.35) +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  geom_abline(color = "red") +
+  theme(text=element_text(size=11))+
+  ggsave("output\\wordnetworks\\wordfrequencycomparison.svg")
+```
+
+
+#Word pairs
+```{r}
+combinedText <- paste(tweets$text, replace(tweets$mentions, is.na(tweets$mentions), "")) # Combine the text and mentions column
+combinedText <- gsub("#\\S+", "", combinedText) # exclude the hashtags
+combinedText <- gsub("@\\S+", "", combinedText) # exclude the mentions
+combinedText <- gsub("[[:cntrl:]]", "", combinedText) # remove Controls and special characters
+combinedText <- gsub("\\d", "", combinedText) # remove Controls and special characters
+combinedText <- gsub("^[[:space:]]*", "", combinedText) # remove leading whitespaces
+combinedText <- gsub("[[:space:]]*$", "", combinedText) # remove trailing whitespaces
+combinedText <- gsub("<.*?>.*?<.*?>", " ", combinedText) # remove all the tags
+combinedText <- gsub(" +", " ", combinedText) # remove extra whitespaces
+combinedText <- gsub("pic(.*)[.|/](.*)", "", combinedText) # exclude the twitter picture links
+combinedText <- gsub("?(f|ht)(tp)(s?)(://)(.*)[.|/](.*)", "", combinedText) # exclude the ftp/http(s) links
+cleanedText <- tibble(text = combinedText) # convert into a data frame without changing the type of inputs.
+
+data(stop_words) # creating dataset of stop words
+mystopwords <- data_frame(word = c("rt")) # creating custom dataset of stop words
+
+tweetsBigram <- cleanedText %>%  # Creating Bigram dataset of words
+  unnest_tokens(tweetsBigram, text, token = "ngrams", n = 2)
+
+bigramsSeparated <- tweetsBigram %>%
+  separate(tweetsBigram, c("word1", "word2"), sep = " ")
+
+bigramsFiltered <- bigramsSeparated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word) %>%
+  filter(!word1 %in% mystopwords$word) %>%
+  filter(!word2 %in% mystopwords$word)
+
+bigramCounts <- bigramsFiltered %>%  # bigram counts
+  count(word1, word2, sort = TRUE)
+
+write.csv(bigramCounts,"output\\csv\\wordbigrams #blacklivesmatter.csv", row.names = FALSE) # Export to CSV
+
+bigramGraph <- bigramCounts %>%
+  filter(n > 30) %>%
+  graph_from_data_frame()
+
+
+a <- grid::arrow(type = "closed", length = unit(.1, "inches"))
+
+ggraph(bigramGraph, layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n), show.legend = FALSE,
+                 arrow = a, end_cap = circle(.01, 'inches'), color = "navy") +
+  geom_node_point(color = "maroon4", size = 1, alpha = 0.4) +
+  geom_node_text(aes(label = name), vjust = .1, hjust = .1, color = "darkslateblue", size=2.5) +
+  labs(title = "Word Pairs: Tweets using the hashtag - #BlackLivesMatter", x = "", y = "") +
+  ggsave("output\\wordnetworks\\wordbigrams #blacklivesmatter.svg")
+  theme_void()
+
+```
